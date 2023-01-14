@@ -1,0 +1,1 @@
+constexpr char *apiurl = "https://127.0.0.1:443/api/v1/";
