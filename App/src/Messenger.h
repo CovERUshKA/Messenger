@@ -11,6 +11,7 @@
 
 #include <single_include/nlohmann/json.hpp>
 
+#define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui.h>
 #include <imgui_stdlib.h>
 #include <backends/imgui_impl_dx11.h>
@@ -21,5 +22,6 @@
 #include "stb_image.h"
 
 #include "Network/Network.h"
+#include "User/User.h"
 
 using namespace std;

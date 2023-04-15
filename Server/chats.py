@@ -1,15 +1,9 @@
 import users
 import database as db
 
-from tinydb import Query
-
-chats = db.chats
+users_chats = db.client["chats"]["users"]
 
 #first = chats.update("1")
-
-Chat = Query()
-
-lock = db.lock
 
 notify = []
 
@@ -17,12 +11,7 @@ def get_chat(chat_id = None):
     if chat_id == None:
         return None
 
-    try:
-        lock.acquire(True)
-
-        chat = chats.search(Chat.chat_id == chat_id)
-    finally:
-        lock.release()
+    chat = users_chats.find_one({"chat_id":chat_id})
 
     if len(chat) == 0:
         return None
@@ -30,12 +19,7 @@ def get_chat(chat_id = None):
     return chat[0]
 
 def get_chats_with_user(user_id):
-    try:
-        lock.acquire(True)
-
-        user_chats = chats.search((Chat.first == user_id) | (Chat.second == user_id))
-    finally:
-        lock.release()
+    user_chats = list(users_chats.find( { "users": user_id}, {"_id":False, "users":True, "messages":True}))
 
     if len(user_chats) == 0:
         return None
@@ -43,12 +27,9 @@ def get_chats_with_user(user_id):
     return user_chats
 
 def get_chat_with_users(first, second):
-    try:
-        lock.acquire(True)
+    user_ids = sorted([first, second])
 
-        chat = chats.search(((Chat.first == first) & (Chat.second == second)) | ((Chat.first == second) & (Chat.second == first)))
-    finally:
-        lock.release()
+    chat = list(users_chats.find({"users":user_ids}, {"_id":False, "users":True, "messages":True}))
 
     if len(chat) == 0:
         return None
@@ -56,13 +37,15 @@ def get_chat_with_users(first, second):
     return chat[0]
 
 def count_chats():
-    return len(chats.all())
+    return len(users_chats.count_documents({}))
     
 def add_message_to_chat(first, second, data):
-    chat = get_chat_with_users(first, second)
+    chat : dict = get_chat_with_users(first, second)
     
     if chat == None:
         return None
+    
+    user_ids = chat.get("users", None)
     
     messages = chat["messages"]
     
@@ -70,14 +53,9 @@ def add_message_to_chat(first, second, data):
     
     data["message_id"] = count_messages + 1
     
-    chat["messages"][count_messages + 1] = data
+    #chat["messages"][count_messages + 1] = data
 
-    try:
-        lock.acquire(True)
-
-        ret = chats.update(chat, ((Chat.first == first) & (Chat.second == second)) | ((Chat.first == second) & (Chat.second == first)))
-    finally:
-        lock.release()
+    users_chats.update_one({"users":user_ids}, {"$push": {"messages":data}})
 
     data["chat"] = {}
 
@@ -99,7 +77,7 @@ def add_chat(first, second):
     chat = get_chat_with_users(first, second)
 
     if chat != None:
-        print("Chat not equal zero")
+        print("Chat already exists")
         return None
 
     user = users.get_user(first)
@@ -112,7 +90,7 @@ def add_chat(first, second):
         print("Unable to get second user")
         return None
 
-    chats.insert({"first": first, "second": second, "messages": {}})
+    users_chats.insert_one({"users": sorted([first, second]), "messages": []})
 
     chat = get_chat_with_users(first, second)
 

@@ -11,25 +11,8 @@ static bool g_wndMinimized = false;
 static HWND hwnd;
 static WNDCLASSEX wc;
 
-struct User {
-    int user_id = -1;
-    std::string username = "";
-};
-
-struct Message {
-    int message_id;
-    int from;
-    std::string text;
-};
-
-struct Chat {
-    int chat_id;
-    std::string name;
-    std::vector<Message> messages;
-};
-
+Network network;
 static User local_user;
-static std::vector<Chat> chats;
 static std::vector<User> search_data;
 
 // Forward declarations of helper functions
@@ -52,18 +35,9 @@ static void OpenSettings()
     }
 }
 
-Message JsonMessageToMessage(nlohmann::json message)
-{
-    int message_id = message["message_id"].get<int>();
-    int from = message["from"].get<int>();
-    std::string text = message["text"].get<std::string>();
-
-    return Message{message_id, from, text};
-}
-
 void DisplayMessage(std::string message_id, std::string username, std::string text)
 {
-    if (username == local_user.username)
+    if (username == local_user.sUsername)
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.5f, 1.0f, 0.7f));
     else
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(1.0f, 1.0f, 1.0f, 0.2f));
@@ -93,53 +67,32 @@ void DisplayMessage(std::string message_id, std::string username, std::string te
     return;
 }
 
-bool AddMessageToChat(int chat_id, std::string chat_name, nlohmann::json message)
-{
-    // range-based for
-    for (auto& chat : chats) {
-        if (chat.chat_id == chat_id)
-        {
-            chat.messages.push_back(JsonMessageToMessage(message));
-            return true;
-        }
-    }
-
-    Chat chat;
-
-    chat.chat_id = chat_id;
-    chat.name = chat_name;
-    chat.messages.push_back(JsonMessageToMessage(message));
-
-    chats.push_back(chat);
-
-    return false;
-}
-
 DWORD WINAPI GetUpdates(LPVOID lpvoid)
 {
     Network updates_network;
     nlohmann::json updates;
-    std::string query_arguments("user_id=");
 
-    int current_user_id = local_user.user_id;
-
-    query_arguments.append(to_string(local_user.user_id).c_str());
+    int current_user_id = local_user.iUserId;
 
     updates_network.Initialize();
 
     if (updates_network.IsInitialized())
     {
+        updates_network.add_header(std::string("Authorization: Bearer ") + local_user.sSessionKey);
+
+        //MessageBoxA(0, (std::string("Bearer ") + local_user.sSessionKey).c_str(), 0, 0);
+
         while (true)
         {
-            if (local_user.user_id != -1)
+            if (local_user.iUserId != -1)
             {
-                if (current_user_id != local_user.user_id)
+                if (current_user_id != local_user.iUserId)
                 {
-                    query_arguments = std::string("user_id=").append(to_string(local_user.user_id));
-                    current_user_id = local_user.user_id;
+                    updates_network.add_header(std::string("Authorization: Bearer ") + local_user.sSessionKey);
+                    current_user_id = local_user.iUserId;
                 }
 
-                if (!updates_network.get_api_with_arguments("getUpdates", query_arguments.c_str(), updates))
+                if (!updates_network.get_api_with_arguments("getUpdates", "", updates))
                     continue;
 
                 // range-based for
@@ -154,7 +107,7 @@ DWORD WINAPI GetUpdates(LPVOID lpvoid)
 
                         message.erase("chat");
 
-                        AddMessageToChat(chat_id, chat_name, message);
+                        local_user.AddMessageToChat(chat_id, chat_name, message);
                     }
                 }
             }
@@ -164,76 +117,15 @@ DWORD WINAPI GetUpdates(LPVOID lpvoid)
     return NULL;
 }
 
-int GetMinimum(nlohmann::json messages)
-{
-    int minimum = -1;
-
-    // range-based for
-    for (auto& message : messages) {
-        int message_id = message["message_id"].get<int>();
-
-        if (minimum == -1 || message_id < minimum)
-            minimum = message_id;
-    }
-
-    return minimum;
-}
-
 void RenderMessages(std::string chat_name, std::vector<Message> messages)
 {
     for (auto& message : messages)
     {
-        std::string username = message.from == local_user.user_id ? local_user.username : chat_name;
+        std::string username = message.from == local_user.iUserId ? local_user.sUsername : chat_name;
         DisplayMessage(std::to_string(message.message_id), username, message.text);
     }
 
     return;
-}
-
-bool LoadChats()
-{
-    nlohmann::json chats_json;
-    std::string query_arguments("user_id=");
-
-    query_arguments.append(to_string(local_user.user_id).c_str());
-
-    if (network.get_api_with_arguments("getChats", query_arguments.c_str(), chats_json))
-    {
-        chats_json = chats_json["result"]["chats"];
-
-        // range-based for
-        for (auto& chat : chats_json) {
-            if (chat.contains("chat_id"))
-            {
-                int chat_id = chat["chat_id"].get<int>();
-                std::string chat_name = chat["name"].get<std::string>();
-
-                auto messages_json = chat["messages"];
-
-                std::vector<Message> messages;
-
-                for (size_t i = 0; i < messages_json.size();)
-                {
-                    int message_id = GetMinimum(messages_json);
-
-                    nlohmann::json message = messages_json[to_string(message_id)];
-                    messages_json.erase(to_string(message_id));
-
-                    int from = message["from"].get<int>();
-                    std::string text = message["text"].get<std::string>();
-
-                    messages.push_back({message_id, from, text});
-                }
-
-                chats.push_back({chat_id, chat_name, messages});
-            }
-            //std::cout << element << '\n';
-        }
-
-        return true;
-    }
-
-    return false;
 }
 
 static HANDLE hUpdates = 0;
@@ -248,51 +140,58 @@ bool BeginUpdatesThread()
     return true;
 }
 
-// Simple helper function to load an image into a DX11 texture with common settings
-bool LoadTextureFromFile(const char* filename, ID3D11ShaderResourceView** out_srv, int* out_width, int* out_height)
+bool SettingsButton(const char* label, const ImVec2& size_arg)
 {
-    // Load from disk into a raw RGBA buffer
-    int image_width = 0;
-    int image_height = 0;
-    unsigned char* image_data = stbi_load(filename, &image_width, &image_height, NULL, 4);
-    if (image_data == NULL)
+    ImGuiButtonFlags flags = ImGuiButtonFlags_None;
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (window->SkipItems)
         return false;
 
-    // Create texture
-    D3D11_TEXTURE2D_DESC desc;
-    ZeroMemory(&desc, sizeof(desc));
-    desc.Width = image_width;
-    desc.Height = image_height;
-    desc.MipLevels = 1;
-    desc.ArraySize = 1;
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    desc.CPUAccessFlags = 0;
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
 
-    ID3D11Texture2D *pTexture = NULL;
-    D3D11_SUBRESOURCE_DATA subResource;
-    subResource.pSysMem = image_data;
-    subResource.SysMemPitch = desc.Width * 4;
-    subResource.SysMemSlicePitch = 0;
-    g_pd3dDevice->CreateTexture2D(&desc, &subResource, &pTexture);
+    ImGuiContext& g = *GImGui;
+    const ImGuiStyle& style = g.Style;
+    const ImGuiID id = window->GetID(label);
+    const ImVec2 label_size = ImGui::CalcTextSize(label, NULL, true);
 
-    // Create texture view
-    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc;
-    ZeroMemory(&srvDesc, sizeof(srvDesc));
-    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-    srvDesc.Texture2D.MipLevels = desc.MipLevels;
-    srvDesc.Texture2D.MostDetailedMip = 0;
-    g_pd3dDevice->CreateShaderResourceView(pTexture, &srvDesc, out_srv);
-    pTexture->Release();
+    ImVec2 pos = window->DC.CursorPos;
+    if ((flags & ImGuiButtonFlags_AlignTextBaseLine) && style.FramePadding.y < window->DC.CurrLineTextBaseOffset) // Try to vertically align buttons that are smaller/have no padding so that text baseline matches (bit hacky, since it shouldn't be a flag)
+        pos.y += window->DC.CurrLineTextBaseOffset - style.FramePadding.y;
+    ImVec2 size = ImGui::CalcItemSize(size_arg, label_size.x + style.FramePadding.x * 2.0f, label_size.y + style.FramePadding.y * 2.0f);
 
-    *out_width = image_width;
-    *out_height = image_height;
-    stbi_image_free(image_data);
+    const ImRect bb(pos, pos + size);
+    ImGui::ItemSize(size, style.FramePadding.y);
+    if (!ImGui::ItemAdd(bb, id))
+        return false;
 
-    return true;
+    if (g.LastItemData.InFlags & ImGuiItemFlags_ButtonRepeat)
+        flags |= ImGuiButtonFlags_Repeat;
+
+    bool hovered, held;
+    bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, flags);
+
+    // Render
+    const ImU32 col = ImGui::GetColorU32((held && hovered) ? ImGuiCol_ButtonActive : hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button);
+    ImGui::RenderNavHighlight(bb, id);
+    ImGui::RenderFrame(bb.Min, bb.Max, col, true, style.FrameRounding);
+
+    if (g.LogEnabled)
+        ImGui::LogSetNextTextDecoration("[", "]");
+
+    float offset_y = 2;
+    
+    draw_list->AddRectFilled(bb.Min + ImVec2(7.0f, 6.0f + offset_y), bb.Min + ImVec2(23.0f, 8.0f + offset_y), ImU32(0xFFFFFFFF));
+    draw_list->AddRectFilled(bb.Min + ImVec2(7.0f, 11.0f + offset_y), bb.Min + ImVec2(23.0f, 13.0f + offset_y), ImU32(0xFFFFFFFF));
+    draw_list->AddRectFilled(bb.Min + ImVec2(7.0f, 16.0f + offset_y), bb.Min + ImVec2(23.0f, 18.0f + offset_y), ImU32(0xFFFFFFFF));
+
+    //ImGui::RenderTextClipped(bb.Min + style.FramePadding, bb.Max - style.FramePadding, label, NULL, &label_size, style.ButtonTextAlign, &bb);
+
+    // Automatically close popups
+    //if (pressed && !(flags & ImGuiButtonFlags_DontClosePopups) && (window->Flags & ImGuiWindowFlags_Popup))
+    //    CloseCurrentPopup();
+
+    IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags);
+    return pressed;
 }
 
 // Main code
@@ -329,8 +228,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             return 1;
         }
 
-        nlohmann::json success;
-
         // Setup Dear ImGui context
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -347,7 +244,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         style.WindowPadding = ImVec2(0, 0);
         style.ScrollbarSize = 5;
         //style.ItemSpacing = ImVec2(1, 0);
-        //style.
 
         // Setup Platform/Renderer backends
         ImGui_ImplWin32_Init(hwnd);
@@ -480,57 +376,30 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                         ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
                         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
                     }
-
-                    //ImGui::SetCursorPosX()
-                    //ImGui::PushIte
                     
                     if (ImGui::Button("Login"))
                     {
-                        nlohmann::json result;
-                        std::string login_query("username=");
-
-                        login_query.append(input_username);
-                        login_query.append("&password=");
-                        login_query.append(input_password);
-
-                        // username=KEK&password=12345
-                        auto success = network.get_api_with_arguments("login", login_query.c_str(), result);
-
-                        if (success)
+                        if (local_user.Login(input_username, input_password))
                         {
-                            if (result["ok"] == true)
+                            if (local_user.LoadChats())
                             {
-                                nlohmann::json user_data = result["result"];
+                                BeginUpdatesThread();
 
-                                int user_id = user_data["user_id"].get<int>();
-                                std::string username = user_data["username"].get<std::string>();
+                                input_username.clear();
+                                input_password.clear();
 
-                                local_user = {user_id, username};
+                                style.ItemSpacing = ImVec2(1, 0);
 
-                                if (LoadChats())
-                                {
-                                    BeginUpdatesThread();
-
-                                    input_username.clear();
-                                    input_password.clear();
-
-                                    style.ItemSpacing = ImVec2(1, 0);
-
-                                    type = 2;
-                                }
-                                else
-                                {
-                                    login_register_error = "Unable to load chats";
-                                }
+                                type = 2;
                             }
-                            else if (result["ok"] == false)
+                            else
                             {
-                                login_register_error = result["description"];
+                                login_register_error = "Unable to load chats";
                             }
                         }
                         else
                         {
-                            login_register_error = result["description"];
+                            login_register_error = local_user.sLastError;
                         }
                         
                     }
@@ -570,48 +439,27 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
                     if (ImGui::Button("Create"))
                     {
-                        nlohmann::json response;
-                        std::string create_query("username=");
-
-                        create_query.append(input_username);
-                        create_query.append("&password=");
-                        create_query.append(input_password);
-
                         if (input_password.compare(input_password_confirmation) == 0)
                         {
                             // username=KEK&password=12345
-                            if (network.get_api_with_arguments("createAccount", create_query.c_str(), response))
+                            if (local_user.Register(input_username, input_password, input_password_confirmation))
                             {
-                                if(response["ok"] == true)
+                                if (local_user.LoadChats())
                                 {
-                                    auto result = response["result"];
-                                    
-                                    int user_id = result["user_id"].get<int>();
-                                    std::string username = result["username"].get<std::string>();
+                                    BeginUpdatesThread();
 
-                                    local_user = {user_id, username};
+                                    input_username.clear();
+                                    input_password.clear();
+                                    input_password_confirmation.clear();
 
-                                    if (LoadChats())
-                                    {
-                                        BeginUpdatesThread();
+                                    style.ItemSpacing = ImVec2(1, 0);
 
-                                        input_username.clear();
-                                        input_password.clear();
-                                        input_password_confirmation.clear();
-
-                                        style.ItemSpacing = ImVec2(1, 0);
-
-                                        type = 2;
-                                    }
-                                }
-                                else
-                                {
-                                    login_register_error = response["description"];
+                                    type = 2;
                                 }
                             }
                             else
                             {
-                                login_register_error = response["description"];
+                                login_register_error = local_user.sLastError;
                             }
                         }
                         else
@@ -637,14 +485,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 // Logged in
                 else if (type == 2)
                 {
-                    auto chats_copy = chats;
+                    auto chats_copy = local_user.chats;
 
                     // List of chats
                     ImGui::BeginChild("Chats", ImVec2(100, viewport->WorkSize.y));
                     
                     style.ItemSpacing = ImVec2(1, 1);
 
-                    if (ImGui::Button("~", ImVec2(30, 30)))
+                    if (SettingsButton("Settings_button", ImVec2(30, 30)))
                     {
                         ImGui::SetNextWindowPos(ImVec2(viewport->WorkSize.x/2, viewport->WorkSize.y/2), ImGuiCond_Appearing, ImVec2(0.5f,0.5f));
                         ImGui::OpenPopup("Settings");
@@ -658,9 +506,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
                             SecureZeroMemory(&local_user, sizeof(User));
 
-                            local_user.user_id = -1;
+                            local_user.Logout();
 
-                            chats.clear();
                             search_data.clear();
 
                             style.ItemSpacing = ImVec2(8, 4);
@@ -673,14 +520,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                         ImGui::EndPopup();
                     }
 
-                    int my_image_width = 25;
-                    int my_image_height = 25;
-                    ID3D11ShaderResourceView* my_texture = NULL;
-                    bool ret = LoadTextureFromFile("settings.png", &my_texture, &my_image_width, &my_image_height);
-                    IM_ASSERT(ret);
-
-                    ImGui::Image((void*)my_texture, ImVec2(0.1f, 0.1f));
-
                     ImGui::SameLine();
 
                     if (ImGui::InputTextWithHint("##Search", "Search", &input_search, ImGuiInputTextFlags_EnterReturnsTrue))
@@ -688,13 +527,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                         nlohmann::json result;
                         std::string query_arguments("user_id=");
 
-                        query_arguments.append(to_string(local_user.user_id).c_str());
+                        query_arguments.append(to_string(local_user.iUserId).c_str());
 
                         query_arguments.append("&data=");
 
                         query_arguments.append(input_search);
 
-                        if (network.get_api_with_arguments("search", query_arguments.c_str(), result))
+                        if (input_search.length() != 0 && network.get_api_with_arguments("search", query_arguments.c_str(), result))
                         {
                             if (result["ok"] == true)
                             {
@@ -709,9 +548,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                                         int user_id = user["user_id"].get<int>();
                                         std::string username = user["username"].get<std::string>();
 
-                                        search_data.push_back({user_id, username});
+                                        //search_data.push_back({user_id, username});
                                     }
-                                    //std::cout << element << '\n';
                                 }
                             }
                             else
@@ -728,15 +566,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                     {
                         // range-based for
                         for (auto& user : search_data) {
-                            bool current = (active_chat == user.user_id);
+                            bool current = (active_chat == user.iUserId);
                             if (current)
                             {
                                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.26f, 0.59f, 0.98f, 0.8f));
                             }
 
-                            if (ImGui::Button(user.username.c_str(), ImVec2(100, 30)))
+                            if (ImGui::Button(user.sUsername.c_str(), ImVec2(100, 30)))
                             {
-                                active_chat = user.user_id;
+                                active_chat = user.iUserId;
                             }
 
                             if (current)
@@ -805,23 +643,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
                         ImGui::EndChild();
 
-                        if (ImGui::InputTextWithHint("##Message input", "Message input", &input_message, ImGuiInputTextFlags_EnterReturnsTrue) && input_message.length() != 0 && input_message.length() <= 4960)
+                        if (ImGui::InputTextWithHint("##Message input", "Message input", &input_message, ImGuiInputTextFlags_EnterReturnsTrue)
+                            && input_message.length() != 0
+                            && input_message.length() <= 4960)
                         {
-                            std::string query_arguments("user_id=");
-
-                            query_arguments.append(to_string(local_user.user_id).c_str());
-
-                            query_arguments.append("&chat_id=");
-
-                            query_arguments.append(to_string(active_chat).c_str());
-
-                            query_arguments.append("&text=");
-
-                            query_arguments.append(network.encode_string(input_message));
-
-                            network.get_api_with_arguments("sendMessage", query_arguments.c_str(), success);
-
-                            input_message.clear();
+                            if (local_user.SendMessageToChat(active_chat, input_message))
+                            {
+                                input_message.clear();
+                            }
                         }
 
                         if (ImGui::IsItemDeactivatedAfterEdit())

@@ -8,6 +8,8 @@ set(SOURCES
     src/config.h
     src/Messenger.h
     src/Messenger.cpp
+    src/User/User.h
+    src/User/User.cpp
     src/Network/Network.h
     src/Network/Network.cpp)
 
@@ -31,8 +33,6 @@ set(imgui
     thirdparty/imgui-1.85/backends/imgui_impl_win32.cpp
     thirdparty/imgui-1.85/backends/imgui_impl_win32.h
 )
-
-
 
 add_executable(Messenger WIN32 ${SOURCES} ${imgui})
 

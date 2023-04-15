@@ -1,39 +1,42 @@
 import threading
 import users
 import chats
+import jwt
+from crypt import get_secret_key
 
-from flask import Flask, jsonify, request
+from functools import wraps
+from responses import SuccessResponse, ErrorResponse
+
+from flask import Flask, request
 
 app = Flask(__name__)
 
-def SuccessResponse(result):
-    response = {"ok":True, "result":result}
+def login_required(f):
+    @wraps(f)
+    def wrap(*args, **kwargs):
+        authorization = request.headers.get("Authorization", None, type=str)
+        if authorization == None:
+            return ErrorResponse("Authorization header not provided", 400)
+        
+        token = authorization[7:]
+        try:
+            token_info = jwt.decode(token, get_secret_key(), algorithms='HS256')
+            user_id = token_info.get("user_id", None)
+        except Exception as e:
+            return ErrorResponse("Invalid token", 400)
 
-    return jsonify(response)
+        return f(user_id, *args, **kwargs)
 
-#{
-#   ok: false,
-#   error_code: error_code,
-#   description: "wewewe"
-# }
-def ErrorResponse(description, error_code):
-    response = {"ok":False, "error_code":error_code, "description":description}
+    return wrap
 
-    return jsonify(response), error_code
-
-# https://127.0.0.1:443/api/v1/sendMessage?user_id=1&chat_id=2&text=12345
+# https://127.0.0.1:443/api/v1/sendMessage?chat_id=2&text=12345
 @app.route('/api/v1/sendMessage')
-def send_message():
+@login_required
+def send_message(user_id:int):
     arguments = request.args
 
     text = arguments.get("text")
-    str_user_id = arguments.get("user_id")
     str_chat_id = arguments.get("chat_id")
-
-    if str_user_id == None:
-        return ErrorResponse("user_id equals nil", 400)
-    elif not str_user_id.isdecimal():
-        return ErrorResponse("user_id not is decimal", 400)
 
     if str_chat_id == None:
         return ErrorResponse("chat_id equals nil", 400)
@@ -47,7 +50,6 @@ def send_message():
     elif text.__len__() > 4960:
         return ErrorResponse("text length is too much", 400)
 
-    user_id = int(str_user_id)
     chat_id = int(str_chat_id)
 
     if users.get_user(user_id) == None:
@@ -61,32 +63,23 @@ def send_message():
         
         if chat == None:
             chat = chats.add_chat(user_id, chat_id)
-            
+        
+        print("ЭТОТТТ ----", user_id)
         print(chat)
 
         if chat == None:
             return ErrorResponse("User or chat_id not exists", 400)
         
-        message = chats.add_message_to_chat(chat["first"], chat["second"], {"from": user_id, "text":text})
+        message = chats.add_message_to_chat(chat["users"][0], chat["users"][1], {"from": user_id, "text":text})
         
         return SuccessResponse(message)
     else:
         return ErrorResponse("This chat_id not supported", 500)
 
-# https://127.0.0.1:443/api/v1/getUpdates?user_id=1
+# https://127.0.0.1:443/api/v1/getUpdates
 @app.route('/api/v1/getUpdates')
-def get_updates():
-    arguments = request.args
-
-    str_user_id = arguments.get("user_id")
-
-    if str_user_id == None:
-        return ErrorResponse("user_id equals nil", 400)
-    elif not str_user_id.isdecimal():
-        return ErrorResponse("user_id not is decimal", 400)
-
-    user_id = int(str_user_id)
-
+@login_required
+def get_updates(user_id:int):
     notifier = threading.Event()
 
     chats.notify.append([user_id, notifier])
@@ -104,43 +97,30 @@ def get_updates():
     
     return SuccessResponse(updates)
 
-# https://127.0.0.1:443/api/v1/getChats?user_id=1
+# https://127.0.0.1:443/api/v1/getChats
 @app.route('/api/v1/getChats')
-def get_chats():
-    arguments = request.args
-
-    str_user_id = arguments.get("user_id")
-
-    if str_user_id == None:
-        return ErrorResponse("user_id equals nil", 400)
-    elif not str_user_id.isdecimal():
-        return ErrorResponse("user_id not is decimal", 400)
-
-    user_id = int(str_user_id)
-
+@login_required
+def get_chats(user_id:int):
     user = users.get_user(user_id)
 
     if user != None:
         users.empty_user_updates(user_id)
         
         user_chats = users.get_user_chats(user_id)
+
+        print(user_chats)
         
         return SuccessResponse({"chats": user_chats})
 
     return ErrorResponse("User with this id doesn't exist", 400)
 
-# https://127.0.0.1:443/api/v1/search?user_id=1&data=KEK
+# https://127.0.0.1:443/api/v1/search?data=KEK
 @app.route('/api/v1/search')
-def search():
+@login_required
+def search(user_id:int):
     arguments = request.args
 
     data = arguments.get("data")
-    str_user_id = arguments.get("user_id")
-
-    if str_user_id == None:
-        return ErrorResponse("user_id equals nil", 400)
-    elif not str_user_id.isdecimal():
-        return ErrorResponse("user_id not is decimal", 400)
 
     if data == None:
         return ErrorResponse("data equals None", 400)
@@ -149,19 +129,17 @@ def search():
     elif data.__len__() > 32:
         return ErrorResponse("data length must be less or equal 32", 400)
 
-    user_id = int(str_user_id)
-
     founded_users = users.search_users(user_id, data)
 
     return SuccessResponse({"users": founded_users})
 
 # https://127.0.0.1:443/api/v1/createAccount?username=HAH&password=12345
-@app.route('/api/v1/createAccount')
+@app.route('/api/v1/createAccount', methods=["POST"])
 def create_account():
-    arguments = request.args
+    body = request.get_json(silent=True)
 
-    username = arguments.get("username")
-    password = arguments.get("password")
+    username = body.get("username")
+    password = body.get("password")
 
     if username == None:
         return ErrorResponse("Username equals nil", 400)
@@ -179,9 +157,6 @@ def create_account():
 
     #return "success"
 
-    if users.get_user_with_username(username):
-        return ErrorResponse("User with this username already exists", 400)
-
     user = users.add_user(username, password)
     if user == False:
         return ErrorResponse("User with this username already exist", 400)
@@ -189,12 +164,17 @@ def create_account():
     return SuccessResponse(user)
 
 # https://127.0.0.1:443/api/v1/login?username=HAH&password=12345
-@app.route('/api/v1/login')
+@app.route('/api/v1/login', methods=["POST"])
 def login():
-    arguments = request.args
+    body = request.get_json()
 
-    username = arguments.get("username")
-    password = arguments.get("password")
+    username = body.get("username")
+    password = body.get("password")
+
+    print(username)
+    print(password)
+    print(body)
+    print(body)
 
     if username == None:
         return ErrorResponse("username equals nil", 400)
