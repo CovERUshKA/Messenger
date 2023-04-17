@@ -4,7 +4,7 @@ import argon2
 import datetime
 import jwt
 
-from crypt import get_secret_key
+from crypto import get_secret_key
 
 ph = argon2.PasswordHasher()
 

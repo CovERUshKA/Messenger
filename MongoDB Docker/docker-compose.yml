@@ -1,0 +1,10 @@
+version: "3.3"
+
+services:
+  
+  mongo:
+    image: mongo:latest
+    container_name: database_mongoDB
+    ports:
+      - "8913:27017"
+    restart: always

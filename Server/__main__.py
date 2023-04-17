@@ -2,7 +2,7 @@ import threading
 import users
 import chats
 import jwt
-from crypt import get_secret_key
+from crypto import get_secret_key
 
 from functools import wraps
 from responses import SuccessResponse, ErrorResponse

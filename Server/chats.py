@@ -130,11 +130,11 @@ def create_group(name: str, creator_user_id: int, users_id: list):
             print(f"Unable to get user with id: {user_id} to create group")
             return None
         
-    users_id.append(creator_user_id)
+    all_users = users_id + [creator_user_id]
 
     group_id = 0 - 1 - count_groups()
 
-    groups_chats.insert_one({"chat_id": group_id, "name": name, "creator": creator_user_id, "users": sorted(users_id), "messages": []})
+    groups_chats.insert_one({"chat_id": group_id, "name": name, "creator": creator_user_id, "users": sorted(all_users), "messages": []})
 
     chat = get_group_with_id(group_id)
 
@@ -145,6 +145,13 @@ def create_group(name: str, creator_user_id: int, users_id: list):
         user = users.get_user(group_user_id)
         users_with_info.append({"user_id": user["user_id"], "username": user["username"]})
     chat["users"] = users_with_info
+
+    for user_id in users_id:
+        users.add_update(user_id, {"group":chat})
+
+    for i in notify:
+        if i[0] in users_id:
+            i[1].set()
 
     if chat != None:
         return chat

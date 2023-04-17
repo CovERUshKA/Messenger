@@ -27,14 +27,3 @@ def get_secret_key():
             settings_collection.update_one({}, {"$set":{"secret_key":secret_key}})
 
     return secret_key
-
-# def hash(password:str):
-#     hash_secret(
-#             secret=_ensure_bytes(password, self.encoding),
-#             salt=os.urandom(self.salt_len),
-#             time_cost=self.time_cost,
-#             memory_cost=self.memory_cost,
-#             parallelism=self.parallelism,
-#             hash_len=self.hash_len,
-#             type=self.type,
-#         ).decode("ascii")

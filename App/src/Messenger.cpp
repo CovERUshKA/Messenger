@@ -95,6 +95,31 @@ DWORD WINAPI GetUpdates(LPVOID lpvoid)
 
                         local_user.AddMessageToChat(chat_id, chat_name, message);
                     }
+                    else if (element.contains("group"))
+                    {
+                        nlohmann::json json_group;
+                        json_group = element["group"];
+
+                        Chat group;
+
+                        group.chat_id = json_group["chat_id"].get<int>();
+                        group.name = json_group["name"].get<std::string>();
+
+                        auto users_json = json_group["users"];
+
+                        for (size_t i = 0; i < users_json.size();)
+                        {
+                            nlohmann::json user = users_json[0];
+                            users_json.erase(0);
+
+                            int iUserId = user["user_id"].get<int>();
+                            std::string sUsername = user["username"].get<std::string>();
+
+                            group.users.push_back({iUserId, sUsername});
+                        }
+
+                        local_user.chats.push_back(group);
+                    }
                 }
             }
         }
@@ -517,10 +542,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                             for (auto& known_user : known_users)
                             {
                                 char buf[64];
+                                auto item = std::find(selected_users.begin(), selected_users.end(), known_user.iUserId);
+                                bool is_selected = item != selected_users.end();
                                 sprintf(buf, "%s", known_user.sUsername.c_str());
-                                if (ImGui::Selectable(buf, std::find(selected_users.begin(), selected_users.end(), known_user.iUserId) != selected_users.end()))
+                                if (ImGui::Selectable(buf, is_selected))
                                 {
-                                    selected_users.push_back(known_user.iUserId);
+                                    if (is_selected)
+                                    {
+                                        selected_users.erase(item);
+                                    }
+                                    else
+                                    {
+                                        selected_users.push_back(known_user.iUserId);
+                                    }
                                 }
                             }
                             ImGui::TreePop();
@@ -536,7 +570,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                         {
                             type = 0;
 
-                            //SecureZeroMemory(&local_user, sizeof(User));
+                            settings_menu = false;
+                            group_name.clear();
+                            selected_users.clear();
 
                             local_user.Logout();
 
