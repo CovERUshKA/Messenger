@@ -23,7 +23,7 @@ def login_required(f):
             token_info = jwt.decode(token, get_secret_key(), algorithms='HS256')
             user_id = token_info.get("user_id", None)
         except Exception as e:
-            return ErrorResponse("Invalid token", 400)
+            return ErrorResponse("Invalid authorization token", 400)
 
         return f(user_id, *args, **kwargs)
 
@@ -36,12 +36,10 @@ def send_message(user_id:int):
     arguments = request.args
 
     text = arguments.get("text")
-    str_chat_id = arguments.get("chat_id")
+    chat_id = arguments.get("chat_id", type=int)
 
-    if str_chat_id == None:
-        return ErrorResponse("chat_id equals nil", 400)
-    elif not str_chat_id.isdecimal():
-        return ErrorResponse("chat_id not is decimal", 400)
+    if chat_id == None:
+        return ErrorResponse("Invalid chat_id", 400)
 
     if text == None:
         return ErrorResponse("text equals nil", 400)
@@ -49,8 +47,6 @@ def send_message(user_id:int):
         return ErrorResponse("text length equals 0", 400)
     elif text.__len__() > 4960:
         return ErrorResponse("text length is too much", 400)
-
-    chat_id = int(str_chat_id)
 
     if users.get_user(user_id) == None:
         return ErrorResponse("Ivalid user_id", 400)
@@ -63,9 +59,6 @@ def send_message(user_id:int):
         
         if chat == None:
             chat = chats.add_chat(user_id, chat_id)
-        
-        print("ЭТОТТТ ----", user_id)
-        print(chat)
 
         if chat == None:
             return ErrorResponse("User or chat_id not exists", 400)
@@ -73,8 +66,46 @@ def send_message(user_id:int):
         message = chats.add_message_to_chat(chat["users"][0], chat["users"][1], {"from": user_id, "text":text})
         
         return SuccessResponse(message)
+    elif chat_id < 0:
+        chat = chats.get_group_with_id(chat_id)
+        
+        if chat == None:
+            return ErrorResponse("Invalid chat_id", 400)
+        
+        message = chats.add_message_to_group(user_id, chat_id, {"from": user_id, "text":text})
+        
+        return SuccessResponse(message)
     else:
         return ErrorResponse("This chat_id not supported", 500)
+    
+# https://127.0.0.1:443/api/v1/createGroup
+@app.route('/api/v1/createGroup', methods=["POST"])
+@login_required
+def create_group(user_id:int):
+    
+    body = request.get_json(silent=True)
+
+    group_name = body.get("name", None)
+    group_users = body.get("users", None)
+
+    if type(group_users) != list:
+        return ErrorResponse("users are incorrect", 400)
+
+    if group_name == None:
+        return ErrorResponse("group name equals nil", 400)
+    elif type(group_name) != str:
+        return ErrorResponse("group name must be string", 400)
+    elif group_name.__len__() == 0:
+        return ErrorResponse("group name length equals 0", 400)
+    elif group_name.__len__() > 32:
+        return ErrorResponse("group name length is too much", 400)
+
+    if users.get_user(user_id) == None:
+        return ErrorResponse("Ivalid user_id", 400)
+
+    group = chats.create_group(group_name, user_id, group_users)
+    
+    return SuccessResponse(group)
 
 # https://127.0.0.1:443/api/v1/getUpdates
 @app.route('/api/v1/getUpdates')
@@ -129,7 +160,7 @@ def search(user_id:int):
     elif data.__len__() > 32:
         return ErrorResponse("data length must be less or equal 32", 400)
 
-    founded_users = users.search_users(user_id, data)
+    founded_users = users.search_users(data)
 
     return SuccessResponse({"users": founded_users})
 
@@ -155,8 +186,6 @@ def create_account():
     elif password.__len__() > 32:
         return ErrorResponse("Password length must be less or equal 32", 400)
 
-    #return "success"
-
     user = users.add_user(username, password)
     if user == False:
         return ErrorResponse("User with this username already exist", 400)
@@ -174,7 +203,6 @@ def login():
     print(username)
     print(password)
     print(body)
-    print(body)
 
     if username == None:
         return ErrorResponse("username equals nil", 400)
@@ -189,8 +217,6 @@ def login():
         return ErrorResponse("password length cannot be 0", 400)
     elif password.__len__() > 32:
         return ErrorResponse("password length must be less or equal 32", 400)
-
-    #return "success"
 
     success, user = users.login_user(username, password)
     if success == False:

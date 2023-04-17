@@ -13,7 +13,6 @@ static WNDCLASSEX wc;
 
 Network network;
 static User local_user;
-static std::vector<User> search_data;
 
 // Forward declarations of helper functions
 bool CreateDeviceD3D(HWND hWnd);
@@ -21,19 +20,6 @@ void CleanupDeviceD3D();
 void CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-// Helper to display a little (?) mark which shows a tooltip when hovered.
-// In your own code you may want to display an actual icon if you are using a merged icon fonts (see docs/FONTS.md)
-static void OpenSettings()
-{
-    ImGui::OpenPopup("ImportAssetDialog");
-
-    if (ImGui::BeginPopupModal("ImportAssetDialog"))
-    {
-        ImGui::Text("test");
-        ImGui::EndPopup();
-    }
-}
 
 void DisplayMessage(std::string message_id, std::string username, std::string text)
 {
@@ -117,11 +103,21 @@ DWORD WINAPI GetUpdates(LPVOID lpvoid)
     return NULL;
 }
 
-void RenderMessages(std::string chat_name, std::vector<Message> messages)
+void RenderMessages(Chat chat)
 {
-    for (auto& message : messages)
+    for (auto& message : chat.messages)
     {
-        std::string username = message.from == local_user.iUserId ? local_user.sUsername : chat_name;
+        std::string username;
+        if (chat.chat_id < 0)
+        {
+            username = chat.GetName(message.from);
+        }
+        else
+        {
+            username = message.from == local_user.iUserId ? local_user.sUsername : chat.name;
+        }
+        
+        
         DisplayMessage(std::to_string(message.message_id), username, message.text);
     }
 
@@ -185,10 +181,6 @@ bool SettingsButton(const char* label, const ImVec2& size_arg)
     draw_list->AddRectFilled(bb.Min + ImVec2(7.0f, 16.0f + offset_y), bb.Min + ImVec2(23.0f, 18.0f + offset_y), ImU32(0xFFFFFFFF));
 
     //ImGui::RenderTextClipped(bb.Min + style.FramePadding, bb.Max - style.FramePadding, label, NULL, &label_size, style.ButtonTextAlign, &bb);
-
-    // Automatically close popups
-    //if (pressed && !(flags & ImGuiButtonFlags_DontClosePopups) && (window->Flags & ImGuiWindowFlags_Popup))
-    //    CloseCurrentPopup();
 
     IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags);
     return pressed;
@@ -320,7 +312,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 //ImGui::ShowDemoWindow(&show_demo_window);
 
             static bool p_open = true;
-            static int active_chat = -1;
+            static bool settings_menu = false;
+            static int active_chat = 0;
             static int type = 0; // 0 - Login, 1 - Registration, 2 - Logged in
 
             static bool use_work_area = true;
@@ -395,6 +388,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                             else
                             {
                                 login_register_error = "Unable to load chats";
+                                local_user.Logout();
                             }
                         }
                         else
@@ -485,87 +479,76 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 // Logged in
                 else if (type == 2)
                 {
+                    static string group_name;
+                    static std::vector<int> selected_users;
+                    static std::vector<User> searched_users;
                     auto chats_copy = local_user.chats;
 
                     // List of chats
-                    ImGui::BeginChild("Chats", ImVec2(100, viewport->WorkSize.y));
+                    ImGui::BeginChild("Chats", ImVec2(150, viewport->WorkSize.y));
                     
                     style.ItemSpacing = ImVec2(1, 1);
 
                     if (SettingsButton("Settings_button", ImVec2(30, 30)))
                     {
+                        group_name.clear();
+                        selected_users.clear();
+                        settings_menu = !settings_menu;
                         ImGui::SetNextWindowPos(ImVec2(viewport->WorkSize.x/2, viewport->WorkSize.y/2), ImGuiCond_Appearing, ImVec2(0.5f,0.5f));
-                        ImGui::OpenPopup("Settings");
-                    }
-
-                    if (ImGui::BeginPopup("Settings", ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove)) // <-- use last item id as popup id
-                    {
-                        if (ImGui::Button("Logout"))
-                        {
-                            type = 0;
-
-                            SecureZeroMemory(&local_user, sizeof(User));
-
-                            local_user.Logout();
-
-                            search_data.clear();
-
-                            style.ItemSpacing = ImVec2(8, 4);
-
-                            ImGui::CloseCurrentPopup();
-                        }
-                        
-                        if (ImGui::Button("Close popup"))
-                            ImGui::CloseCurrentPopup();
-                        ImGui::EndPopup();
                     }
 
                     ImGui::SameLine();
 
                     if (ImGui::InputTextWithHint("##Search", "Search", &input_search, ImGuiInputTextFlags_EnterReturnsTrue))
                     {
-                        nlohmann::json result;
-                        std::string query_arguments("user_id=");
-
-                        query_arguments.append(to_string(local_user.iUserId).c_str());
-
-                        query_arguments.append("&data=");
-
-                        query_arguments.append(input_search);
-
-                        if (input_search.length() != 0 && network.get_api_with_arguments("search", query_arguments.c_str(), result))
-                        {
-                            if (result["ok"] == true)
-                            {
-                                auto users_json = result["result"]["users"];
-
-                                search_data.clear();
-
-                                // range-based for
-                                for (auto& user : users_json) {
-                                    if (user.contains("user_id") && user.contains("username"))
-                                    {
-                                        int user_id = user["user_id"].get<int>();
-                                        std::string username = user["username"].get<std::string>();
-
-                                        //search_data.push_back({user_id, username});
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                
-                            }
-                        }
+                        searched_users = local_user.SearchUsers(input_search);
                     }
 
                     auto old_style = style.ItemSpacing;
                     style.ItemSpacing = ImVec2(1, 0);
 
-                    if (input_search.length() != 0)
+                    if (settings_menu)
+                    {
+                        ImGui::InputTextWithHint("##GroupName", "Group Name", &group_name, 0);
+
+                        if (ImGui::TreeNode("Add users"))
+                        {
+                            auto known_users = local_user.GetKnownUsers();
+                            for (auto& known_user : known_users)
+                            {
+                                char buf[64];
+                                sprintf(buf, "%s", known_user.sUsername.c_str());
+                                if (ImGui::Selectable(buf, std::find(selected_users.begin(), selected_users.end(), known_user.iUserId) != selected_users.end()))
+                                {
+                                    selected_users.push_back(known_user.iUserId);
+                                }
+                            }
+                            ImGui::TreePop();
+                        }
+
+                        if (ImGui::Button("Create Group"))
+                        {
+                            local_user.CreateGroup(group_name, selected_users);
+                            selected_users.clear();
+                        }
+
+                        if (ImGui::Button("Logout"))
+                        {
+                            type = 0;
+
+                            //SecureZeroMemory(&local_user, sizeof(User));
+
+                            local_user.Logout();
+
+                            searched_users.clear();
+
+                            style.ItemSpacing = ImVec2(8, 4);
+                        }
+                    }
+                    else if (input_search.length() != 0)
                     {
                         // range-based for
-                        for (auto& user : search_data) {
+                        for (auto& user : searched_users) {
                             bool current = (active_chat == user.iUserId);
                             if (current)
                             {
@@ -585,9 +568,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                     }
                     else
                     {
-                        if(search_data.size() != 0)
+                        if(searched_users.size() != 0)
                         {
-                            search_data.clear();
+                            searched_users.clear();
                         }
 
                         // range-based for
@@ -614,7 +597,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
                     ImGui::SameLine();
 
-                    if (active_chat != -1)
+                    if (active_chat != 0)
                     {
                         Chat active_chat_struct;
 
@@ -625,8 +608,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                                 active_chat_struct = chat;
                             }
                         }
-
-                        auto messages = active_chat_struct.messages;
 
                         // Active chat
                         ImGui::BeginChild("Active Chat", ImVec2(viewport->WorkSize.x/5 * 4 - 1, viewport->WorkSize.y));
@@ -639,7 +620,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                         ImGui::BeginChild("Active Chat Messages", ImVec2(viewport->WorkSize.x/5 * 4 - 1, viewport->WorkSize.y - 21));
 
                         // Render messages
-                        RenderMessages(active_chat_struct.name, messages);
+                        RenderMessages(active_chat_struct);
 
                         ImGui::EndChild();
 
@@ -647,14 +628,21 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                             && input_message.length() != 0
                             && input_message.length() <= 4960)
                         {
+                            //MessageBoxA(0, "1", "1", 0);
                             if (local_user.SendMessageToChat(active_chat, input_message))
                             {
+                                //MessageBoxA(0, "88", "88", 0);
                                 input_message.clear();
                             }
+                            //MessageBoxA(0, "999", "99", 0);
                         }
-
+                        
                         if (ImGui::IsItemDeactivatedAfterEdit())
+                        {
+                            //MessageBoxA(0, "-1", "-1", 0);
                             ImGui::SetKeyboardFocusHere(-1); // Auto focus previous widget
+                            //MessageBoxA(0, "-2", "-2", 0);
+                        }
 
                         // Demonstrate keeping auto focus on the input box
                         // if (ImGui::IsItemHovered() || (ImGui::IsRootWindowOrAnyChildFocused() && !ImGui::IsAnyItemActive() && !ImGui::IsMouseClicked(0)))

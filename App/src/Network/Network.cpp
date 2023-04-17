@@ -24,6 +24,8 @@ bool Network::get_api_with_arguments(std::string method, std::string arguments, 
 {
     std::string result;
 
+    //MessageBoxA(0, "333", "333", 0);
+
     if (!get_api_with_arguments(method, arguments, result))
     {
         json_result["ok"] = false;
@@ -31,6 +33,8 @@ bool Network::get_api_with_arguments(std::string method, std::string arguments, 
         json_result["description"] = result;
         return false;
     }
+
+    //MessageBoxA(0, "444", "444", 0);
 
     //MessageBoxA(0, result.c_str(), 0, 0);
 
@@ -120,8 +124,13 @@ bool Network::post_api_with_json(std::string method, std::string json_data, std:
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST" );
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_data.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, json_data.length());
+    
+    auto curl_headers = LoadHeaders();
 
-    add_header("Content-Type: application/json");
+    // the actual code has the actual token in place of <my_token>
+    curl_headers = curl_slist_append(curl_headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, curl_headers);
 
     //MessageBoxA(0, url.c_str(), "Url", 0);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -133,6 +142,8 @@ bool Network::post_api_with_json(std::string method, std::string json_data, std:
     //curl_easy_setopt(BinanceAPI::curl, CURLOPT_ENCODING, "gzip");
 
     curlResult = curl_easy_perform(curl);
+
+    curl_slist_free_all(curl_headers);
 
     //MessageBoxA(0, str_result.c_str(), "Unsuccess curl", 0);
 
@@ -157,28 +168,45 @@ Network::get_api_with_arguments(std::string method, std::string arguments, std::
     CURLcode curlResult;
 
     std::string url(apiurl);
-
+    //MessageBoxA(0, "01", "02", 0);
     url += method;
     url += "?";
     url += arguments;
-
+    //MessageBoxA(0, "00", "00", 0);
     if( !curl ) {
         str_result = "curl is empty";
         return false;
     }
 
+    //MessageBoxA(0, "111", "111", 0);
+
     //MessageBoxA(0, url.c_str(), "Url", 0);
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curlResult = curl_easy_setopt(curl, CURLOPT_POST, 0);
+    curlResult = curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    //MessageBoxA(0, "22", "22", 0);
     //curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &str_result);
+    curlResult = curl_easy_setopt(curl, CURLOPT_WRITEDATA, &str_result);
+    //MessageBoxA(0, "33", "33", 0);
     //curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, false);
     // Используем метод GET в api
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET" );
+    curlResult = curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "GET" );
+    curlResult = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, 0);
+    curlResult = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0);
+    //MessageBoxA(0, "44", "44", 0);
+
+    auto curl_headers = LoadHeaders();
+    curlResult = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, curl_headers);
+
+    //MessageBoxA(0, curl_easy_strerror(curlResult), "Unsuccess curl", 0);
 
     // This sometimes cause curl_easy_perform to fail, idk why this been set here
     //curl_easy_setopt(BinanceAPI::curl, CURLOPT_ENCODING, "gzip");
 
     curlResult = curl_easy_perform(curl);
+
+    curl_slist_free_all(curl_headers);
+
+    //MessageBoxA(0, "55", "55", 0);
 
     /* Check for errors */ 
     if ( curlResult != CURLE_OK ) {
@@ -228,14 +256,43 @@ bool Network::Initialize()
     return this->initialized;
 }
 
+curl_slist* Network::LoadHeaders()
+{
+    curl_slist* curl_headers = nullptr;
+    for (auto& header : headers)
+    {
+        curl_headers = curl_slist_append(curl_headers, header.c_str());
+    }
+
+    return curl_headers;
+}
+
+bool Network::clear_header()
+{
+    CURLcode curlResult;
+
+    headers.clear();
+
+    curlResult = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, 0);
+
+    /* Check for errors */ 
+    if ( curlResult != CURLE_OK ) {
+        //str_result = curl_easy_strerror(curlResult);
+        MessageBoxA(0, curl_easy_strerror(curlResult), "Unsuccess curl headers clearing", 0);
+        return false;
+        //BinanceAPI_logger::write_log( "<BinanceAPI::curl_api_with_header> curl_easy_perform() failed: %s" , curl_easy_strerror(curlResult) );
+    }
+
+    return true;
+}
+
 bool Network::add_header(std::string data)
 {
-    struct curl_slist* headers = NULL;
-
+    headers.push_back(data);
     // the actual code has the actual token in place of <my_token>
-    headers = curl_slist_append(headers, data.c_str());
+    // headers = curl_slist_append(headers, data.c_str());
 
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    // curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
     return true;
 }

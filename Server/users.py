@@ -13,6 +13,9 @@ auth_db = db.client.get_database("auth")
 users = auth_db.get_collection("users")
 
 def get_user(user_id):
+    if type(user_id) != int:
+        return None
+
     user = users.find_one({"user_id":user_id}, {"_id":False, "user_id":True, "username":True, "session_key":True, "updates":True})
 
     return user
@@ -71,6 +74,10 @@ def get_user_chats(user_id):
         return []
 
     for chat in user_chats:
+        print(chat)
+        if chat.get("chat_id", None) != None:
+            continue
+
         users = chat.get("users", None)
         if users == None:
             continue
@@ -127,11 +134,7 @@ def empty_user_updates(user_id):
     return True
 
 def search_users(data):
-    users_cursor = users.find({"username": {"$regex":data}}, {"_id":False, "user_id":True, "username":True})
-
-    users_list = list(users_cursor)
-
-    print(users_list)
+    users_list = list(users.find({"username": {"$regex":data}}, {"_id":False, "user_id":True, "username":True}))
 
     return users_list
 
@@ -155,6 +158,6 @@ def add_user(username, password):
 
     users.insert_one({"username": username, "password_hash": password_hash, "user_id": user_id, "updates":[], "session_key":None})
     
-    user = get_user(user_id)
+    success, user = login_user(username, password)
 
     return user

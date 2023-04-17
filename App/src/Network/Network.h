@@ -16,6 +16,9 @@ public:
     bool IsInitialized();
 
     bool add_header(std::string data);
+    bool clear_header();
+
+    curl_slist* LoadHeaders();
 
     bool get_api_with_arguments(std::string method, std::string arguments, std::string& str_result);
     bool get_api_with_arguments(std::string method, std::string arguments, nlohmann::json& str_result);
@@ -30,6 +33,8 @@ private:
     bool initialized;
 
     CURL *curl;
+
+    std::vector<std::string> headers;
 
     // буфер для сохранения текстовых ошибок
     char curlErrorBuffer[CURL_ERROR_SIZE];

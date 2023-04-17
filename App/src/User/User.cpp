@@ -10,6 +10,19 @@ Message JsonMessageToMessage(nlohmann::json message)
     return Message{message_id, from, text};
 }
 
+std::vector<User> User::GetKnownUsers()
+{
+    std::vector<User> known;
+    for (auto& chat : chats) {
+        if (chat.chat_id > 0)
+        {
+            known.push_back({chat.chat_id, chat.name});
+        }
+    }
+
+    return known;
+}
+
 bool User::LoadChats()
 {
     nlohmann::json chats_json;
@@ -24,12 +37,27 @@ bool User::LoadChats()
                 && chat.contains("name")
                 && chat.contains("messages"))
             {
-                int chat_id = chat["chat_id"].get<int>();
-                std::string chat_name = chat["name"].get<std::string>();
+                Chat new_chat;
+                new_chat.chat_id = chat["chat_id"].get<int>();
+                new_chat.name = chat["name"].get<std::string>();
+
+                if (new_chat.chat_id < 0)
+                {
+                    auto users_json = chat["users"];
+
+                    for (size_t i = 0; i < users_json.size();)
+                    {
+                        nlohmann::json user = users_json[0];
+                        users_json.erase(0);
+
+                        int iUserId = user["user_id"].get<int>();
+                        std::string sUsername = user["username"].get<std::string>();
+
+                        new_chat.users.push_back({iUserId, sUsername});
+                    }
+                }
 
                 auto messages_json = chat["messages"];
-
-                std::vector<Message> messages;
 
                 for (size_t i = 0; i < messages_json.size();)
                 {
@@ -40,10 +68,10 @@ bool User::LoadChats()
                     int from = message["from"].get<int>();
                     std::string text = message["text"].get<std::string>();
 
-                    messages.push_back({message_id, from, text});
+                    new_chat.messages.push_back({message_id, from, text});
                 }
 
-                chats.push_back({chat_id, chat_name, messages});
+                chats.push_back(new_chat);
             }
             //std::cout << element << '\n';
         }
@@ -79,8 +107,12 @@ bool User::AddMessageToChat(int chat_id, std::string chat_name, nlohmann::json m
 void User::Logout()
 {
     iUserId = -1;
+    sUsername = "";
+    sSessionKey = "";
+    sLastError = "";
 
     chats.clear();
+    network.clear_header();
 }
 
 bool User::SendMessageToChat(int chat_id, std::string sMessage)
@@ -88,15 +120,112 @@ bool User::SendMessageToChat(int chat_id, std::string sMessage)
     nlohmann::json result;
     std::string query_arguments("chat_id=");
 
+    //MessageBoxA(0, "2", "2", 0);
+
     query_arguments.append(std::to_string(chat_id));
+
+    //MessageBoxA(0, "3", "3", 0);
 
     query_arguments.append("&text=");
 
+    //MessageBoxA(0, "4", "4", 0);
+
     query_arguments.append(network.encode_string(sMessage));
+
+    //MessageBoxA(0, "5", "5", 0);
 
     network.get_api_with_arguments("sendMessage", query_arguments.c_str(), result);
 
+    //MessageBoxA(0, "7", "7", 0);
+
     return true;
+}
+
+std::vector<User> User::SearchUsers(std::string input_search)
+{
+    std::vector<User> found_users;
+    nlohmann::json result;
+    std::string query_arguments("data=");
+
+    query_arguments.append(input_search);
+
+    if (input_search.length() != 0 && network.get_api_with_arguments("search", query_arguments.c_str(), result))
+    {
+        if (result["ok"] == true)
+        {
+            auto users_json = result["result"]["users"];
+
+            // range-based for
+            for (auto& user : users_json) {
+                if (user.contains("user_id") && user.contains("username"))
+                {
+                    int user_id = user["user_id"].get<int>();
+                    std::string username = user["username"].get<std::string>();
+
+                    found_users.push_back({user_id, username});
+                }
+            }
+        }
+    }
+
+    return found_users;
+}
+
+bool User::CreateGroup(std::string sGroupName, std::vector<int> iUsersId)
+{
+    nlohmann::json result;
+    nlohmann::json body;
+
+    body["name"] = sGroupName;
+    body["users"] = iUsersId;
+
+    MessageBoxA(0, body.dump().c_str(), 0, 0);
+
+    // username=KEK&password=12345
+    //auto success = network.get_api_with_arguments("login", login_query.c_str(), result);
+    auto success = network.post_api_with_json("createGroup", body.dump().c_str(), result);
+
+    //MessageBoxA(0, result.dump().c_str(), 0, 0);
+
+    if (success)
+    {
+        if (result["ok"] == true)
+        {
+            auto data = result["result"];
+
+            Chat chat;
+
+            chat.chat_id = data["chat_id"].get<int>();
+            chat.name = data["name"].get<std::string>();
+            
+            auto users_json = data["users"];
+
+            for (size_t i = 0; i < users_json.size();)
+            {
+                nlohmann::json user = users_json[0];
+                users_json.erase(0);
+
+                int iUserId = user["user_id"].get<int>();
+                std::string sUsername = user["username"].get<std::string>();
+
+                chat.users.push_back({iUserId, sUsername});
+            }
+
+            chats.push_back(chat);
+
+            return true;
+        }
+        else if (result["ok"] == false)
+        {
+            sLastError = result["description"];
+        }
+    }
+    else
+    {
+        sLastError = result["description"];
+    }
+
+    return false;
 }
 
 bool User::Register(std::string username, std::string password, std::string password_confirmation)
@@ -117,7 +246,7 @@ bool User::Register(std::string username, std::string password, std::string pass
             if(response["ok"] == true)
             {
                 auto user_data = response["result"];
-                MessageBoxA(0, user_data.dump().c_str(), 0, 0);
+                //MessageBoxA(0, user_data.dump().c_str(), 0, 0);
                 
                 iUserId = user_data["user_id"].get<int>();
                 sUsername = user_data["username"].get<std::string>();
@@ -188,7 +317,22 @@ bool User::Login(std::string username, std::string password)
     return false;
 }
 
+User::User(int iUserId, std::string sUsername)
+{
+    this->iUserId = iUserId;
+    this->sUsername = sUsername;
+}
+
 User::User() : iUserId(-1)
 {
     network.Initialize();
+}
+
+std::string Chat::GetName(int iUserId)
+{
+    for (auto& user : users)
+        if (user.iUserId == iUserId)
+            return user.sUsername;
+
+    return "Unknown";
 }
