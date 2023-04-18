@@ -179,8 +179,6 @@ bool User::CreateGroup(std::string sGroupName, std::vector<int> iUsersId)
     body["name"] = sGroupName;
     body["users"] = iUsersId;
 
-    MessageBoxA(0, body.dump().c_str(), 0, 0);
-
     // username=KEK&password=12345
     //auto success = network.get_api_with_arguments("login", login_query.c_str(), result);
     auto success = network.post_api_with_json("createGroup", body.dump().c_str(), result);

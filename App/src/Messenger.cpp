@@ -564,6 +564,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                         {
                             local_user.CreateGroup(group_name, selected_users);
                             selected_users.clear();
+                            settings_menu = false;
                         }
 
                         if (ImGui::Button("Logout"))
